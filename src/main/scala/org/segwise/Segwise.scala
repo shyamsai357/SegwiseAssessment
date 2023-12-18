@@ -105,5 +105,23 @@ object Segwise {
     |Cricbuzz - Live Cricket Scores                                   |SPORTS             |1557176  |
     |OneFootball - Soccer Scores                                      |SPORTS             |1536446  |
      */
+
+    //Q2.How many apps between certain price range, released in certain year, is adSupported and has a certain ratings and of a certain price etc?
+
+    // df4 --> Apps between price range 1 and 100, released in 2018, is adSupported and has a rating of 10000 and above
+    val df4 = df1.select("title", "price", "releasedYear", "adSupported", "rating").where("price > 0 AND price <= 100 AND releasedYear = 2018 AND adSupported = 1 AND rating >= 10000").sort(desc("rating"))
+    df4.show(1000, false)
+    /*
+      +-----------------------------+-----+------------+-----------+------+
+      |title                        |price|releasedYear|adSupported|rating|
+      +-----------------------------+-----+------------+-----------+------+
+      |Shadow of Death: Dark Knight |3.99 |2018        |1          |457652|
+      |Cartoon Craft                |1.99 |2018        |1          |65613 |
+      |null                         |3.99 |2018        |1          |33680 |
+      |Dungeon Shooter : Dark Temple|3.49 |2018        |1          |21047 |
+      |Teen Titans GO Figure!       |3.99 |2018        |1          |18220 |
+      +-----------------------------+-----+------------+-----------+------+
+     */
+
   }
 }
