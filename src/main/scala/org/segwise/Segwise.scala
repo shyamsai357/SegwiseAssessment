@@ -2,7 +2,7 @@ package org.segwise
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.expressions.Window
-import org.apache.spark.sql.functions.{col,concat,  concat_ws, count, dense_rank, desc, lit, rank, sum, udf, when}
+import org.apache.spark.sql.functions.{col, concat, count, dense_rank, desc, lit, rank, sum, udf}
 
 object Segwise {
   def main(args: Array[String]): Unit = {
@@ -21,6 +21,8 @@ object Segwise {
       .option("header", "true")
       .option("inferSchema", "true")
       .csv("src/main/resources/input/records1000")
+    // orignal dataset not commited to git due to size
+    //Note: All data generated is with the help of original dataset
     //.csv("src/main/resources/input/original/google-play-dataset-by-tapivedotcom.csv")
 
     df.show()
@@ -76,7 +78,8 @@ object Segwise {
 
     // df2 --> Top Free apps for ART_AND_DESIGN genre in 2018 descending order by ratings
     val df2 = df1.select("title", "releasedYear", "free", "genreId", "ratings").where("free = 1 AND genreId = 'ART_AND_DESIGN' AND releasedYear = 2018").sort(desc("rating"))
-    df2.show(1000, false)
+    println("Top Free apps for ART_AND_DESIGN genre in 2018 descending order by ratings")
+    df2.show(false)
     /*
       +-----------------------------------------------------------+------------+----+--------------+-------+
       |title                                                      |releasedYear|free|genreId       |ratings|
@@ -94,7 +97,8 @@ object Segwise {
 
     // df3 --> Top 3 free app in each genreId descending order by ratings
     val df3 = df1.select("title", "genreId", "rating").where("free = 1").withColumn("rank", rank().over(Window.partitionBy("genreId").orderBy($"rating".desc))).filter($"rank" <= 3).drop("rank")
-    df3.show(1000, false)
+    println("Top 3 free app in each genreId descending order by ratings")
+    df3.show(false)
     /*
     +-----------------------------------------------------------------+-------------------+---------+
     |title                                                            |genreId            |rating   |
@@ -113,7 +117,8 @@ object Segwise {
 
     // df4 --> Apps between price range 1 and 100, released in 2018, is adSupported and has a rating of 10000 and above
     val df4 = df1.select("title", "price", "releasedYear", "adSupported", "rating").where("price > 0 AND price <= 100 AND releasedYear = 2018 AND adSupported = 1 AND rating >= 10000").sort(desc("rating"))
-    df4.show(1000, false)
+    println("Apps between price range 1 and 100, released in 2018, is adSupported and has a rating of 10000 and above")
+    df4.show(false)
     /*
       +-----------------------------+-----+------------+-----------+------+
       |title                        |price|releasedYear|adSupported|rating|
@@ -131,8 +136,6 @@ object Segwise {
     // This means there are a 1000 apps released between years 2005-2010.
 
     val df6 = df1.select("appId", "releasedYear").withColumn("releaseYear", $"releasedYear".cast("Int")).drop("releasedYear")
-    df6.show(false)
-    import org.apache.spark.sql.functions._
 
     // Define the minimum count for a bin to be considered
     val minCount = 20
@@ -165,6 +168,7 @@ object Segwise {
         col("count")
       )
 
+    println("Data like --> Year=[2005-2010], 1000")
     resultDF.show(truncate = false)
     /*
       +----------------+------+
@@ -189,6 +193,49 @@ object Segwise {
     println(resultDF.agg(sum("count")).collect()(0).getLong(0)) //3353549 -- count decreased from 3460966 to 3353549 after filtering out bins that contribute less than 2% of the total volume
     println(df6.count()) //3460966
      */
+
+    //Q4. Price=[4-5]; genre=Art & Design; Installs=[10000-100000], 100
+    //This means that there are a 100 apps with a combination of price between 4-5, belonging to genre “Art & Design”, installs
+    //between 10k and 100k.
+    val df7 = df1.select("price", "genre", "minInstalls").withColumn("appPrice", $"price".cast("Double"))
+      .withColumn("installs", $"minInstalls".cast("Long")).drop("price", "minInstalls")
+
+    /*
+    df7.printSchema()
+    root
+     |-- genre: string (nullable = true)
+     |-- appPrice: double (nullable = true)
+     |-- installs: long (nullable = true)
+     */
+
+
+    // UDF to create a bin for the price and installs
+    val createBin = udf((value: Double, binSize: Double) => {
+      val lowerBound = (value / binSize).toInt * binSize
+      s"[$lowerBound-${lowerBound + binSize}]"
+    })
+
+    // Create bins for price and installs
+    val dfBins = df7
+      .withColumn("priceBin", createBin(col("appPrice"), lit(1.0)))
+      .withColumn("installsBin", createBin(col("installs"), lit(10000.0)))
+      .groupBy("priceBin", "genre", "installsBin")
+      .agg(count("*").as("count"))
+      .filter(col("count") >= minCount)
+
+    println("Data like --> Price=[4-5]; genre=Art & Design; Installs=[10000-100000], 1000")
+    dfBins.orderBy("count").show(false)
+    /*
+      +------------+-----------------+-------------------+-----+
+      |priceBin    |genre            |installsBin        |count|
+      +------------+-----------------+-------------------+-----+
+      |[8.0-9.0]   |Health & Fitness |[0.0-10000.0]      |20   |
+      |[2.0-3.0]   |Comics           |[0.0-10000.0]      |20   |
+      |[13.0-14.0] |Business         |[0.0-10000.0]      |20   |
+      |[9.0-10.0]  |Puzzle           |[0.0-10000.0]      |20   |
+     */
+
+    dfBins.coalesce(1).write.mode("overwrite").csv("src/main/resources/output/PriceGenreInstalls")
 
   }
 }
