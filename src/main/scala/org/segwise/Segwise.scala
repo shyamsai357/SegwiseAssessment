@@ -2,7 +2,7 @@ package org.segwise
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.expressions.Window
-import org.apache.spark.sql.functions.{desc, rank}
+import org.apache.spark.sql.functions.{col,concat,  concat_ws, count, dense_rank, desc, lit, rank, sum, udf, when}
 
 object Segwise {
   def main(args: Array[String]): Unit = {
@@ -11,6 +11,9 @@ object Segwise {
       .appName("Segwise")
       .master("local[*]")
       .getOrCreate()
+
+    spark.sparkContext.setLogLevel("ERROR")
+
 
     import spark.implicits._
 
@@ -121,6 +124,70 @@ object Segwise {
       |Dungeon Shooter : Dark Temple|3.49 |2018        |1          |21047 |
       |Teen Titans GO Figure!       |3.99 |2018        |1          |18220 |
       +-----------------------------+-----+------------+-----------+------+
+     */
+
+
+    //Q3. Year=[2005-2010], 1000
+    // This means there are a 1000 apps released between years 2005-2010.
+
+    val df6 = df1.select("appId", "releasedYear").withColumn("releaseYear", $"releasedYear".cast("Int")).drop("releasedYear")
+    df6.show(false)
+    import org.apache.spark.sql.functions._
+
+    // Define the minimum count for a bin to be considered
+    val minCount = 20
+
+    // UDF to create a bin for the release year
+    val createYearBin = udf((year: Int) => s"${(year / 5) * 5}-${(year / 5) * 5 + 4}")
+
+    // Create bins and calculate counts
+    val binsDF = df6
+      .withColumn("bin", createYearBin(col("releaseYear")))
+      .groupBy("bin", "releaseYear")
+      .agg(count("*").as("count"))
+      .filter(col("count") >= minCount)
+
+    // Window specification for ranking
+    val windowSpec = Window.orderBy(col("count").desc)
+
+    // Rank the bins based on count
+    val rankedBinsDF = binsDF.withColumn("rank", dense_rank().over(windowSpec))
+
+    // Filter out bins that contribute less than 2% of the total volume
+    val totalVolume = rankedBinsDF.agg(sum("count")).collect()(0).getLong(0)
+    val filteredBinsDF = rankedBinsDF.filter(col("count") >= totalVolume * 0.02)
+
+    // Join the filtered bins with the original DataFrame to get other columns
+    val resultDF = df6.select("releaseYear").distinct()
+      .join(filteredBinsDF, df6("releaseYear") === filteredBinsDF("releaseYear"))
+      .select(
+        concat(lit("Year=["), col("bin"), lit("]")).as("year"),
+        col("count")
+      )
+
+    resultDF.show(truncate = false)
+    /*
+      +----------------+------+
+      |year            |count |
+      +----------------+------+
+      |Year=[2015-2019]|298600|
+      |Year=[2015-2019]|104936|
+      |Year=[2020-2024]|586160|
+      |Year=[2010-2014]|72401 |
+      |Year=[2015-2019]|514839|
+      |Year=[2020-2024]|696791|
+      |Year=[2015-2019]|145384|
+      |Year=[2015-2019]|218256|
+      |Year=[2020-2024]|716182|
+      +----------------+------+
+     */
+
+    //save resultsDf in overwrite mode
+    resultDF.coalesce(1).write.mode("overwrite").csv("src/main/resources/output/YearRange5")
+
+    /*
+    println(resultDF.agg(sum("count")).collect()(0).getLong(0)) //3353549 -- count decreased from 3460966 to 3353549 after filtering out bins that contribute less than 2% of the total volume
+    println(df6.count()) //3460966
      */
 
   }
